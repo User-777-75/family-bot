@@ -1,10 +1,11 @@
 import sqlite3
 import datetime
+import os
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 from database import init_db
 
-TOKEN = "8578774333:AAHZynk3J6tijiBAXLUQvdLaN99jgkd1txI"
+TOKEN = os.getenv("TOKEN") 
 FAMILY_CODE = "FAMILY20162026"
 
 user_states = {}
