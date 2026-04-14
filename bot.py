@@ -5,7 +5,8 @@ from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 from database import init_db
 
-TOKEN = os.getenv("TOKEN") 
+TOKEN = os.getenv("TOKEN")
+print("TOKEN =", TOKEN) 
 FAMILY_CODE = "FAMILY20162026"
 
 user_states = {}
