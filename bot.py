@@ -1,0 +1,219 @@
+import sqlite3
+import datetime
+import os
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from database import init_db
+
+TOKEN = os.getenv("TOKEN")
+
+FAMILY_CODE = "1234"  # можешь поменять
+
+user_states = {}
+
+# --- Главное меню ---
+def main_menu():
+    keyboard = [
+        ["👤 Профиль"],
+        ["💬 Написать семье"],
+        ["🔔 Напоминание"],
+        ["⭐ Премиум"]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+# --- Добавление пользователя ---
+def add_user(user_id, name):
+    conn = sqlite3.connect("family.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT OR IGNORE INTO users (telegram_id, name) VALUES (?, ?)",
+        (user_id, name)
+    )
+    conn.commit()
+    conn.close()
+
+# --- Команда /start ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    user_states[user.id] = "awaiting_code"
+    await update.message.reply_text("🔐 Введите код семьи:")
+
+# --- Отправка напоминания ---
+async def send_reminder(context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_message(
+        chat_id=context.job.chat_id,
+        text=f"🔔 Напоминание:\n\n{context.job.data}"
+    )
+
+# --- Обработка сообщений ---
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    user_id = update.effective_user.id
+
+    conn = sqlite3.connect("family.db")
+    cursor = conn.cursor()
+
+    # --- выбор типа напоминания ---
+    if user_states.get(user_id) == "choose_reminder_type":
+        if text == "1":
+            user_states[user_id] = "awaiting_reminder_delay"
+            await update.message.reply_text("⏳ Через сколько минут? (например: 10)")
+            return
+
+        elif text == "2":
+            user_states[user_id] = "awaiting_reminder_text"
+            context.user_data["reminder_mode"] = "once"
+            await update.message.reply_text("📝 Введите текст напоминания:")
+            return
+
+        elif text == "3":
+            user_states[user_id] = "awaiting_reminder_text"
+            context.user_data["reminder_mode"] = "daily"
+            await update.message.reply_text("📝 Введите текст напоминания:")
+            return
+
+    # --- через X минут ---
+    if user_states.get(user_id) == "awaiting_reminder_delay":
+        try:
+            minutes = int(text)
+
+            context.job_queue.run_once(
+                send_reminder,
+                when=minutes * 60,
+                chat_id=user_id,
+                data="⏰ Напоминание!"
+            )
+
+            await update.message.reply_text(f"✅ Напомню через {minutes} минут")
+            user_states[user_id] = None
+        except:
+            await update.message.reply_text("❌ Введи число (например 10)")
+        return
+
+    # --- Проверка кода семьи ---
+    if user_states.get(user_id) == "awaiting_code":
+        if text == FAMILY_CODE:
+            add_user(user_id, update.effective_user.first_name)
+            user_states[user_id] = None
+            await update.message.reply_text(
+                "✅ Добро пожаловать ❤️",
+                reply_markup=main_menu()
+            )
+        else:
+            await update.message.reply_text("❌ Неверный код")
+        conn.close()
+        return
+
+    # --- текст напоминания ---
+    if user_states.get(user_id) == "awaiting_reminder_text":
+        context.user_data["reminder_text"] = text
+        user_states[user_id] = "awaiting_reminder_time"
+        await update.message.reply_text("⏰ Введите время ЧЧ:ММ (например 18:30)")
+        return
+
+    # --- время ---
+    if user_states.get(user_id) == "awaiting_reminder_time":
+        try:
+            hour, minute = map(int, text.split(":"))
+            reminder_text = context.user_data.get("reminder_text")
+
+            mode = context.user_data.get("reminder_mode", "daily")
+
+            if mode == "daily":
+                context.job_queue.run_daily(
+                    send_reminder,
+                    time=datetime.time(hour=hour, minute=minute),
+                    chat_id=user_id,
+                    data=reminder_text
+                )
+            else:
+                now = datetime.datetime.now()
+                target = now.replace(hour=hour, minute=minute, second=0)
+
+                if target < now:
+                    target += datetime.timedelta(days=1)
+
+                delay = (target - now).total_seconds()
+
+                context.job_queue.run_once(
+                    send_reminder,
+                    when=delay,
+                    chat_id=user_id,
+                    data=reminder_text
+                )
+
+            await update.message.reply_text("✅ Напоминание установлено!")
+            user_states[user_id] = None
+
+        except:
+            await update.message.reply_text("❌ Введи время так: 18:30")
+        return
+
+    # --- сообщение семье ---
+    if user_states.get(user_id) == "awaiting_message":
+        cursor.execute(
+            "INSERT INTO messages (sender_id, text) VALUES (?, ?)",
+            (user_id, text)
+        )
+        conn.commit()
+
+        cursor.execute("SELECT name FROM users WHERE telegram_id=?", (user_id,))
+        sender_name = cursor.fetchone()[0]
+
+        cursor.execute("SELECT telegram_id FROM users")
+        users = cursor.fetchall()
+
+        for user in users:
+            if user[0] != user_id:
+                await context.bot.send_message(
+                    chat_id=user[0],
+                    text=f"📩 Сообщение от {sender_name}:\n\n{text}"
+                )
+
+        await update.message.reply_text("✅ Отправлено ❤️")
+        user_states[user_id] = None
+        return
+
+    # --- кнопки ---
+    if text == "💬 Написать семье":
+        user_states[user_id] = "awaiting_message"
+        await update.message.reply_text("✏️ Введите сообщение:")
+
+    elif text == "🔔 Напоминание":
+        user_states[user_id] = "choose_reminder_type"
+        await update.message.reply_text(
+            "⏰ Выбери тип:\n\n"
+            "1️⃣ Через время\n"
+            "2️⃣ Сегодня\n"
+            "3️⃣ Каждый день"
+        )
+
+    elif text == "👤 Профиль":
+        cursor.execute("SELECT name FROM users WHERE telegram_id=?", (user_id,))
+        row = cursor.fetchone()
+        if row:
+            await update.message.reply_text(f"Имя: {row[0]}\nID: {user_id}")
+        else:
+            await update.message.reply_text("Профиль не найден")
+
+    elif text == "⭐ Премиум":
+        await update.message.reply_text("Скоро будет ⭐")
+
+    conn.close()
+
+# --- запуск ---
+def main():
+    init_db()
+    app = Application.builder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    print("Бот запущен...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
+
+
+
