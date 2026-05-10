@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import sqlite3
 import datetime
 import os
@@ -398,6 +397,3 @@ def main():
 if __name__ == "__main__":
     main()
 
-
-
->>>>>>> 97f81834217ec492449681dbdf968182b31e1bde
