@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 import sqlite3
 
 def init_db():
@@ -24,7 +24,7 @@ def init_db():
 
     conn.commit()
     conn.close()
-=======
+
 import sqlite3
 
 def init_db():
@@ -50,4 +50,4 @@ def init_db():
 
     conn.commit()
     conn.close()
->>>>>>> 97f81834217ec492449681dbdf968182b31e1bde
+
