@@ -7,7 +7,7 @@ from database import init_db
 
 TOKEN = os.getenv("TOKEN")
 
-FAMILY_CODE = "1234"  # можешь поменять
+FAMILY_CODE = "1972"  # можешь поменять
 
 user_states = {}
 
